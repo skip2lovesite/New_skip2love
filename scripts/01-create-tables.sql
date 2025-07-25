@@ -36,17 +36,6 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create conversations table for easier message management
-CREATE TABLE IF NOT EXISTS conversations (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user1_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  user2_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
-  ad_id UUID REFERENCES ads(id) ON DELETE CASCADE,
-  last_message_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(user1_id, user2_id, ad_id)
-);
-
 -- Create subscriptions table for paid tiers
 CREATE TABLE IF NOT EXISTS subscriptions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -62,19 +51,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 
--- Create policies
+-- Create policies for profiles
 CREATE POLICY "Users can view all profiles" ON profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
+-- Create policies for ads
 CREATE POLICY "Users can view all active ads" ON ads FOR SELECT USING (is_active = true);
 CREATE POLICY "Users can insert own ads" ON ads FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own ads" ON ads FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can delete own ads" ON ads FOR DELETE USING (auth.uid() = user_id);
 
+-- Create policies for messages
 CREATE POLICY "Users can view messages they sent or received" ON messages 
   FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 CREATE POLICY "Users can insert messages they send" ON messages 
@@ -82,11 +72,7 @@ CREATE POLICY "Users can insert messages they send" ON messages
 CREATE POLICY "Users can update messages they received" ON messages 
   FOR UPDATE USING (auth.uid() = receiver_id);
 
-CREATE POLICY "Users can view their conversations" ON conversations 
-  FOR SELECT USING (auth.uid() = user1_id OR auth.uid() = user2_id);
-CREATE POLICY "Users can create conversations" ON conversations 
-  FOR INSERT WITH CHECK (auth.uid() = user1_id OR auth.uid() = user2_id);
-
+-- Create policies for subscriptions
 CREATE POLICY "Users can view own subscription" ON subscriptions 
   FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own subscription" ON subscriptions 
