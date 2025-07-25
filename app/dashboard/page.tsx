@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Search, Plus, MapPin, Calendar } from "lucide-react"
 import Link from "next/link"
+import Image from "next/image"
 
 interface Ad {
   id: string
@@ -17,6 +18,7 @@ interface Ad {
   price: number
   category: string
   location: string
+  images: string[]
   created_at: string
   profiles: {
     email: string
@@ -153,31 +155,35 @@ export default function DashboardPage() {
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredAds.map((ad) => (
-              <Card key={ad.id} className="hover:shadow-lg transition-shadow cursor-pointer">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <CardTitle className="text-lg line-clamp-2">{ad.title}</CardTitle>
-                    <Badge variant="secondary">{ad.category}</Badge>
-                  </div>
-                  <CardDescription className="line-clamp-3">{ad.description}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex items-center text-sm text-gray-600">
-                      <MapPin className="h-4 w-4 mr-1" />
-                      {ad.location}
+              <Link key={ad.id} href={`/ad/${ad.id}`}>
+                <Card className="hover:shadow-lg transition-shadow cursor-pointer h-full">
+                  {ad.images && ad.images.length > 0 && (
+                    <div className="relative h-48 overflow-hidden rounded-t-lg">
+                      <Image src={ad.images[0] || "/placeholder.svg"} alt={ad.title} fill className="object-cover" />
                     </div>
-                    <div className="flex items-center text-sm text-gray-600">
-                      <Calendar className="h-4 w-4 mr-1" />
-                      {new Date(ad.created_at).toLocaleDateString()}
+                  )}
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <CardTitle className="text-lg line-clamp-2">{ad.title}</CardTitle>
+                      <Badge variant="secondary">{ad.category}</Badge>
                     </div>
-                    {ad.price > 0 && <div className="text-lg font-semibold text-green-600">${ad.price}</div>}
-                  </div>
-                  <Button className="w-full mt-4 bg-transparent" variant="outline">
-                    View Details
-                  </Button>
-                </CardContent>
-              </Card>
+                    <CardDescription className="line-clamp-3">{ad.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex items-center text-sm text-gray-600">
+                        <MapPin className="h-4 w-4 mr-1" />
+                        {ad.location}
+                      </div>
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Calendar className="h-4 w-4 mr-1" />
+                        {new Date(ad.created_at).toLocaleDateString()}
+                      </div>
+                      {ad.price > 0 && <div className="text-lg font-semibold text-green-600">${ad.price}</div>}
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         )}
