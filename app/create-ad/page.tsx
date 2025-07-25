@@ -4,15 +4,14 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase"
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Upload, X } from "lucide-react"
-import Link from "next/link"
 import { toast } from "sonner"
 
 const categories = [
@@ -27,88 +26,91 @@ const categories = [
   "Other",
 ]
 
-export default function CreateAdPage() {
+export default function CreateAd() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    price: "",
     category: "",
     location: "",
+    price: "",
   })
   const [images, setImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+
   const router = useRouter()
+  const supabase = createClientComponentClient()
 
   useEffect(() => {
-    checkUser()
-  }, [])
-
-  const checkUser = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) {
-      router.push("/auth/login")
-      return
+    const getUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        router.push("/auth/login")
+        return
+      }
+      setUser(user)
     }
-    setUser(session.user)
-  }
+    getUser()
+  }, [router, supabase.auth])
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }))
+    setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
-    if (files.length + images.length > 5) {
-      toast.error("Maximum 5 images allowed")
+
+    if (images.length + files.length > 5) {
+      toast.error("You can upload maximum 5 images")
       return
     }
 
-    setImages((prev) => [...prev, ...files])
+    const newImages = [...images, ...files]
+    setImages(newImages)
 
     // Create previews
+    const newPreviews = [...imagePreviews]
     files.forEach((file) => {
       const reader = new FileReader()
       reader.onload = (e) => {
-        setImagePreviews((prev) => [...prev, e.target?.result as string])
+        newPreviews.push(e.target?.result as string)
+        setImagePreviews([...newPreviews])
       }
       reader.readAsDataURL(file)
     })
   }
 
   const removeImage = (index: number) => {
-    setImages((prev) => prev.filter((_, i) => i !== index))
-    setImagePreviews((prev) => prev.filter((_, i) => i !== index))
+    const newImages = images.filter((_, i) => i !== index)
+    const newPreviews = imagePreviews.filter((_, i) => i !== index)
+    setImages(newImages)
+    setImagePreviews(newPreviews)
   }
 
-  const uploadImages = async (): Promise<string[]> => {
-    const uploadedUrls: string[] = []
+  const uploadImages = async (adId: string) => {
+    const imageUrls: string[] = []
 
-    for (const image of images) {
-      const fileExt = image.name.split(".").pop()
-      const fileName = `${user.id}/${Date.now()}.${fileExt}`
+    for (let i = 0; i < images.length; i++) {
+      const file = images[i]
+      const fileExt = file.name.split(".").pop()
+      const fileName = `${user.id}/${adId}/${Date.now()}-${i}.${fileExt}`
 
-      const { data, error } = await supabase.storage.from("ad-images").upload(fileName, image)
+      const { error: uploadError } = await supabase.storage.from("ad-images").upload(fileName, file)
 
-      if (error) {
-        console.error("Error uploading image:", error)
+      if (uploadError) {
+        console.error("Error uploading image:", uploadError)
         continue
       }
 
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("ad-images").getPublicUrl(fileName)
+      const { data } = supabase.storage.from("ad-images").getPublicUrl(fileName)
 
-      uploadedUrls.push(publicUrl)
+      imageUrls.push(data.publicUrl)
     }
 
-    return uploadedUrls
+    return imageUrls
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -122,26 +124,33 @@ export default function CreateAdPage() {
     setLoading(true)
 
     try {
-      // Upload images first
-      const imageUrls = await uploadImages()
-
-      // Create the ad
-      const { data, error } = await supabase
+      // Create the ad first
+      const { data: adData, error: adError } = await supabase
         .from("ads")
         .insert({
-          user_id: user.id,
           title: formData.title,
           description: formData.description,
-          price: Number.parseFloat(formData.price) || 0,
           category: formData.category,
           location: formData.location,
-          images: imageUrls,
-          is_active: true,
+          price: formData.price ? Number.parseFloat(formData.price) : null,
+          user_id: user.id,
+          images: [], // We'll update this after uploading images
         })
         .select()
         .single()
 
-      if (error) throw error
+      if (adError) throw adError
+
+      // Upload images if any
+      let imageUrls: string[] = []
+      if (images.length > 0) {
+        imageUrls = await uploadImages(adData.id)
+
+        // Update the ad with image URLs
+        const { error: updateError } = await supabase.from("ads").update({ images: imageUrls }).eq("id", adData.id)
+
+        if (updateError) throw updateError
+      }
 
       toast.success("Ad created successfully!")
       router.push("/dashboard")
@@ -157,7 +166,7 @@ export default function CreateAdPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-500 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading...</p>
         </div>
       </div>
@@ -166,47 +175,43 @@ export default function CreateAdPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </Button>
-            </Link>
-            <h1 className="text-2xl font-bold text-gray-900">Create New Ad</h1>
-          </div>
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-8">
+          <Button variant="ghost" onClick={() => router.back()} className="flex items-center gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <h1 className="text-2xl font-bold text-gray-900">Create New Ad</h1>
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8 max-w-2xl">
-        <Card>
-          <CardHeader>
-            <CardTitle>Post Your Ad</CardTitle>
-            <CardDescription>Fill out the details below to create your classified ad</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Title */}
-              <div className="space-y-2">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Basic Information */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Basic Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
                 <Label htmlFor="title">Title *</Label>
                 <Input
                   id="title"
-                  placeholder="What are you looking for or offering?"
                   value={formData.title}
                   onChange={(e) => handleInputChange("title", e.target.value)}
+                  placeholder="What are you posting about?"
                   maxLength={100}
+                  required
                 />
-                <p className="text-sm text-gray-500">{formData.title.length}/100 characters</p>
+                <p className="text-xs text-gray-500 mt-1">{formData.title.length}/100 characters</p>
               </div>
 
-              {/* Category */}
-              <div className="space-y-2">
+              <div>
                 <Label htmlFor="category">Category *</Label>
-                <Select value={formData.category} onValueChange={(value) => handleInputChange("category", value)}>
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) => handleInputChange("category", value)}
+                  required
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a category" />
                   </SelectTrigger>
@@ -220,75 +225,83 @@ export default function CreateAdPage() {
                 </Select>
               </div>
 
-              {/* Description */}
-              <div className="space-y-2">
+              <div>
                 <Label htmlFor="description">Description *</Label>
                 <Textarea
                   id="description"
-                  placeholder="Provide more details about your ad..."
                   value={formData.description}
                   onChange={(e) => handleInputChange("description", e.target.value)}
-                  rows={5}
+                  placeholder="Describe what you're posting about..."
+                  rows={4}
                   maxLength={1000}
+                  required
                 />
-                <p className="text-sm text-gray-500">{formData.description.length}/1000 characters</p>
+                <p className="text-xs text-gray-500 mt-1">{formData.description.length}/1000 characters</p>
               </div>
 
-              {/* Location */}
-              <div className="space-y-2">
+              <div>
                 <Label htmlFor="location">Location *</Label>
                 <Input
                   id="location"
-                  placeholder="City, State or general area"
                   value={formData.location}
                   onChange={(e) => handleInputChange("location", e.target.value)}
+                  placeholder="City, State"
+                  required
                 />
               </div>
 
-              {/* Price */}
-              <div className="space-y-2">
+              <div>
                 <Label htmlFor="price">Price (optional)</Label>
                 <Input
                   id="price"
                   type="number"
-                  placeholder="0.00"
                   value={formData.price}
                   onChange={(e) => handleInputChange("price", e.target.value)}
+                  placeholder="0.00"
                   min="0"
                   step="0.01"
                 />
-                <p className="text-sm text-gray-500">Leave blank if not applicable</p>
               </div>
+            </CardContent>
+          </Card>
 
-              {/* Images */}
-              <div className="space-y-2">
-                <Label>Images (optional)</Label>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={handleImageUpload}
-                    className="hidden"
-                    id="image-upload"
-                    disabled={images.length >= 5}
-                  />
+          {/* Images */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Images (Optional)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Upload Button */}
+                <div className="flex items-center justify-center w-full">
                   <label
-                    htmlFor="image-upload"
-                    className={`cursor-pointer ${images.length >= 5 ? "opacity-50 cursor-not-allowed" : ""}`}
+                    htmlFor="images"
+                    className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100"
                   >
-                    <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                    <p className="text-sm text-gray-600">
-                      {images.length >= 5 ? "Maximum 5 images reached" : "Click to upload images (max 5)"}
-                    </p>
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                      <Upload className="w-8 h-8 mb-4 text-gray-500" />
+                      <p className="mb-2 text-sm text-gray-500">
+                        <span className="font-semibold">Click to upload</span> or drag and drop
+                      </p>
+                      <p className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB (Max 5 images)</p>
+                    </div>
+                    <input
+                      id="images"
+                      type="file"
+                      className="hidden"
+                      multiple
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      disabled={images.length >= 5}
+                    />
                   </label>
                 </div>
 
                 {/* Image Previews */}
                 {imagePreviews.length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {imagePreviews.map((preview, index) => (
-                      <div key={index} className="relative">
+                      <div key={index} className="relative group">
                         <img
                           src={preview || "/placeholder.svg"}
                           alt={`Preview ${index + 1}`}
@@ -297,31 +310,29 @@ export default function CreateAdPage() {
                         <button
                           type="button"
                           onClick={() => removeImage(index)}
-                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
-                          <X className="h-3 w-3" />
+                          <X className="h-4 w-4" />
                         </button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
 
-              {/* Submit Button */}
-              <div className="flex gap-4 pt-4">
-                <Link href="/dashboard" className="flex-1">
-                  <Button type="button" variant="outline" className="w-full bg-transparent">
-                    Cancel
-                  </Button>
-                </Link>
-                <Button type="submit" disabled={loading} className="flex-1 bg-pink-500 hover:bg-pink-600">
-                  {loading ? "Creating..." : "Create Ad"}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </main>
+          {/* Submit Button */}
+          <div className="flex gap-4">
+            <Button type="button" variant="outline" onClick={() => router.back()} className="flex-1">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading} className="flex-1">
+              {loading ? "Creating..." : "Create Ad"}
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
