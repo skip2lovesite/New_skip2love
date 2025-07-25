@@ -26,6 +26,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 })
 
+// Server-side client for admin operations
+export const createServerClient = () => {
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+}
+
 export type Database = {
   public: {
     Tables: {
